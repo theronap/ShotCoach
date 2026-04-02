@@ -15,11 +15,12 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "ShotCoach",
   description: "Upload a video you love. Get a shot-by-shot guide to recreate it.",
-  viewport: {
-    width: "device-width",
-    initialScale: 1,
-    viewportFit: "cover",   // expands into iPhone notch / dynamic island area
-  },
+};
+
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

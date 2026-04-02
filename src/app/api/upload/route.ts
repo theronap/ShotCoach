@@ -4,8 +4,6 @@ import * as path from "path"
 import * as os from "os"
 import * as crypto from "crypto"
 
-export const config = { api: { bodyParser: false } }
-
 export async function POST(req: NextRequest) {
   const formData = await req.formData()
   const file = formData.get("file") as File | null
