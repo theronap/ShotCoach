@@ -68,7 +68,7 @@ export function drawOverlay(
   }
 
   // Motion arrow
-  if (overlay.arrow_direction) {
+  if (overlay.arrow_direction && overlay.arrow_direction !== "none") {
     drawArrow(ctx, overlay.arrow_direction, cw, ch, color)
   }
 

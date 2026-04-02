@@ -7,7 +7,7 @@ import ShotCard from "./ShotCard"
 
 interface Props {
   shotList: ShotList
-  referenceFrameUrls?: string[]  // data URLs; empty in prototype
+  referenceFrameUrls?: string[]
   onSessionComplete?: (clipUrls: (string | null)[]) => void
 }
 
@@ -20,29 +20,34 @@ export default function CameraCoach({ shotList, referenceFrameUrls = [], onSessi
   const rafRef = useRef<number>(0)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
-  // Frame capture refs for take reviewer
-  const captureTimerRef = useRef<NodeJS.Timeout | null>(null)
   const capturedFramesRef = useRef<string[]>([])
 
   const [shotIndex, setShotIndex] = useState(0)
   const [recordingState, setRecordingState] = useState<RecordingState>("idle")
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null)
+  const [sessionDone, setSessionDone] = useState(false)
   const [clipUrls, setClipUrls] = useState<(string | null)[]>(
     Array(shotList.total_shots).fill(null)
   )
   const [cameraError, setCameraError] = useState<string | null>(null)
   const [elapsedMs, setElapsedMs] = useState(0)
+  const [refExpanded, setRefExpanded] = useState(false)
   const recordStartRef = useRef<number>(0)
 
   const currentShot: Shot = shotList.shots[shotIndex]
   const isMotionShot = currentShot.motion !== "static"
+  const refFrameUrl = referenceFrameUrls[currentShot.reference_frame_index]
 
-  // Start camera
+  // Start rear camera in portrait
   useEffect(() => {
     async function startCamera() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+          video: {
+            facingMode: "environment",   // rear camera
+            width: { ideal: 1080 },
+            height: { ideal: 1920 },     // portrait 9:16
+          },
           audio: false,
         })
         streamRef.current = stream
@@ -52,7 +57,18 @@ export default function CameraCoach({ shotList, referenceFrameUrls = [], onSessi
         }
         setCameraError(null)
       } catch {
-        setCameraError("Camera access denied — check browser permissions and refresh.")
+        // Fall back to any available camera
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+          streamRef.current = stream
+          if (videoRef.current) {
+            videoRef.current.srcObject = stream
+            await videoRef.current.play()
+          }
+          setCameraError(null)
+        } catch {
+          setCameraError("Camera access denied — check browser permissions and refresh.")
+        }
       }
     }
     startCamera()
@@ -62,7 +78,7 @@ export default function CameraCoach({ shotList, referenceFrameUrls = [], onSessi
     }
   }, [])
 
-  // Canvas overlay loop
+  // Canvas overlay loop — fills full screen
   useEffect(() => {
     if (cameraError) return
     const canvas = canvasRef.current
@@ -73,8 +89,8 @@ export default function CameraCoach({ shotList, referenceFrameUrls = [], onSessi
       if (!canvas || !video) return
       const ctx = canvas.getContext("2d")
       if (!ctx) return
-      canvas.width = video.videoWidth || 1280
-      canvas.height = video.videoHeight || 720
+      canvas.width = video.videoWidth || 1080
+      canvas.height = video.videoHeight || 1920
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
       if (recordingState !== "reviewing") {
         drawOverlay(ctx, currentShot.overlay, currentShot.difficulty, currentShot.label)
@@ -85,12 +101,10 @@ export default function CameraCoach({ shotList, referenceFrameUrls = [], onSessi
     return () => cancelAnimationFrame(rafRef.current)
   }, [currentShot, recordingState, cameraError])
 
-  // Elapsed timer during recording
+  // Elapsed timer
   useEffect(() => {
     if (recordingState !== "recording") return
-    const interval = setInterval(() => {
-      setElapsedMs(Date.now() - recordStartRef.current)
-    }, 100)
+    const interval = setInterval(() => setElapsedMs(Date.now() - recordStartRef.current), 100)
     return () => clearInterval(interval)
   }, [recordingState])
 
@@ -98,11 +112,11 @@ export default function CameraCoach({ shotList, referenceFrameUrls = [], onSessi
     const video = videoRef.current
     if (!video) return null
     const offscreen = document.createElement("canvas")
-    offscreen.width = 320
-    offscreen.height = 240
+    offscreen.width = 540
+    offscreen.height = 960
     const ctx = offscreen.getContext("2d")
     if (!ctx) return null
-    ctx.drawImage(video, 0, 0, 320, 240)
+    ctx.drawImage(video, 0, 0, 540, 960)
     return offscreen.toDataURL("image/jpeg", 0.6)
   }, [])
 
@@ -111,9 +125,13 @@ export default function CameraCoach({ shotList, referenceFrameUrls = [], onSessi
     chunksRef.current = []
     capturedFramesRef.current = []
 
-    const mr = new MediaRecorder(streamRef.current, {
-      mimeType: MediaRecorder.isTypeSupported("video/webm") ? "video/webm" : "video/mp4",
-    })
+    const mimeType = MediaRecorder.isTypeSupported("video/mp4")
+      ? "video/mp4"
+      : MediaRecorder.isTypeSupported("video/webm;codecs=h264")
+      ? "video/webm;codecs=h264"
+      : "video/webm"
+
+    const mr = new MediaRecorder(streamRef.current, { mimeType })
     mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data) }
     mr.onstop = () => {
       const blob = new Blob(chunksRef.current, { type: mr.mimeType })
@@ -126,14 +144,12 @@ export default function CameraCoach({ shotList, referenceFrameUrls = [], onSessi
     setRecordingState("recording")
     mr.start(100)
 
-    // Capture frames at 10%, 50%, 90% of target duration
     const durationMs = currentShot.duration_seconds * 1000
-    const snapTimes = [0.1, 0.5, 0.9].map((p) => p * durationMs)
-    snapTimes.forEach((t) => {
+    ;[0.1, 0.5, 0.9].forEach((p) => {
       setTimeout(() => {
         const frame = captureFrame()
         if (frame) capturedFramesRef.current.push(frame)
-      }, t)
+      }, p * durationMs)
     })
   }, [currentShot.duration_seconds, captureFrame])
 
@@ -153,6 +169,7 @@ export default function CameraCoach({ shotList, referenceFrameUrls = [], onSessi
       setShotIndex((i) => i + 1)
       setRecordingState("idle")
     } else {
+      setSessionDone(true)
       onSessionComplete?.(updated)
     }
   }, [recordedBlob, clipUrls, shotIndex, shotList.total_shots, onSessionComplete])
@@ -162,126 +179,184 @@ export default function CameraCoach({ shotList, referenceFrameUrls = [], onSessi
     setRecordingState("idle")
   }, [])
 
+  // ── Session complete ───────────────────────────────────────────────────────
+  if (sessionDone) {
+    try { sessionStorage.setItem("clip_urls", JSON.stringify(clipUrls)) } catch {}
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-black text-white px-6">
+        <div className="text-center w-full max-w-sm space-y-4">
+          <p className="text-5xl">🎬</p>
+          <h2 className="text-2xl font-bold">All shots recorded!</h2>
+          <p className="text-zinc-400">
+            {shotList.total_shots} shot{shotList.total_shots !== 1 ? "s" : ""} in the can.
+          </p>
+          <a
+            href="/stitch"
+            className="block w-full py-4 bg-white text-black rounded-2xl text-lg font-semibold active:scale-95 transition-all"
+          >
+            Stitch &amp; Export →
+          </a>
+          <button
+            onClick={() => {
+              setShotIndex(0)
+              setClipUrls(Array(shotList.total_shots).fill(null))
+              setSessionDone(false)
+              setRecordingState("idle")
+            }}
+            className="w-full py-3 bg-zinc-800 text-zinc-300 rounded-2xl font-medium active:scale-95 transition-all"
+          >
+            Start Over
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Camera error ───────────────────────────────────────────────────────────
   if (cameraError) {
     return (
-      <div className="flex items-center justify-center h-screen bg-black text-white">
-        <div className="text-center max-w-sm p-6">
-          <p className="text-lg font-semibold mb-2">Camera unavailable</p>
+      <div className="flex items-center justify-center min-h-screen bg-black text-white px-6">
+        <div className="text-center max-w-sm space-y-3">
+          <p className="text-lg font-semibold">Camera unavailable</p>
           <p className="text-sm text-zinc-400">{cameraError}</p>
         </div>
       </div>
     )
   }
 
-  const refFrameUrl = referenceFrameUrls[currentShot.reference_frame_index]
-  const elapsedSec = (elapsedMs / 1000).toFixed(1)
-  const targetSec = currentShot.duration_seconds
+  // ── Reviewing state — full screen playback ─────────────────────────────────
+  if (recordingState === "reviewing" && recordedBlob) {
+    return (
+      <div className="relative flex flex-col min-h-screen bg-black text-white">
+        <video
+          src={URL.createObjectURL(recordedBlob)}
+          className="absolute inset-0 w-full h-full object-cover"
+          autoPlay
+          muted
+          loop
+          playsInline
+        />
 
-  return (
-    <div className="flex flex-col h-screen bg-black text-white">
-      {/* Shot progress bar */}
-      <div className="flex gap-1 px-4 pt-3">
-        {shotList.shots.map((s, i) => (
-          <div
-            key={s.shot_number}
-            className={`h-1 flex-1 rounded-full transition-colors ${
-              i < shotIndex ? "bg-green-500" : i === shotIndex ? "bg-white" : "bg-zinc-700"
-            }`}
-          />
-        ))}
-      </div>
-
-      {/* Main panels */}
-      <div className="flex flex-1 gap-3 p-4 min-h-0">
-        {/* Live camera / canvas */}
-        <div className="relative flex-1 bg-zinc-900 rounded-xl overflow-hidden">
-          <video ref={videoRef} className="absolute inset-0 w-full h-full object-cover opacity-0" playsInline muted />
-          <canvas ref={canvasRef} className="w-full h-full object-contain" />
-          {recordingState === "recording" && (
-            <div className="absolute top-3 left-3 flex items-center gap-2 bg-red-600 rounded-full px-3 py-1 text-sm font-medium">
-              <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
-              REC {elapsedSec}s / {targetSec}s
+        {/* Top bar */}
+        <div className="relative z-10 flex items-center justify-between px-4 pt-safe pt-4">
+          <div className="bg-black/60 rounded-full px-3 py-1 text-sm font-medium">
+            Review take
+          </div>
+          {isMotionShot && (
+            <div className="bg-black/60 rounded-full px-3 py-1 text-xs text-zinc-300">
+              Motion — judge yourself
             </div>
           )}
         </div>
 
-        {/* Reference frame + shot info */}
-        <div className="w-64 flex flex-col gap-3">
-          {/* Reference frame */}
-          <div className="bg-zinc-900 rounded-xl overflow-hidden aspect-video flex items-center justify-center">
-            {refFrameUrl ? (
-              <img src={refFrameUrl} alt="Reference" className="w-full h-full object-contain" />
-            ) : (
-              <div className="text-center text-zinc-500 p-4 text-sm">
-                <p className="text-2xl mb-1">🎬</p>
-                <p>Reference frame will appear after analysis</p>
-              </div>
-            )}
-          </div>
-
-          {/* Shot card */}
-          <ShotCard shot={currentShot} />
-
-          {/* Coaching tip */}
-          <div className="bg-zinc-800 rounded-xl p-3 text-sm text-zinc-300 leading-relaxed">
-            {currentShot.coaching_tip}
+        {/* Bottom controls */}
+        <div className="relative z-10 mt-auto px-4 pb-safe pb-8 space-y-3">
+          <div className="flex gap-3">
+            <button
+              onClick={handleRetake}
+              className="flex-1 py-4 bg-black/70 backdrop-blur-sm text-white rounded-2xl text-lg font-semibold active:scale-95 transition-all border border-white/20"
+            >
+              Retake
+            </button>
+            <button
+              onClick={handleApprove}
+              className="flex-1 py-4 bg-green-500 text-white rounded-2xl text-lg font-semibold active:scale-95 transition-all"
+            >
+              {shotIndex + 1 < shotList.total_shots ? "Next →" : "Finish ✓"}
+            </button>
           </div>
         </div>
       </div>
+    )
+  }
 
-      {/* Controls */}
-      <div className="px-4 pb-6">
-        {recordingState === "idle" && (
-          <button
-            onClick={startRecording}
-            className="w-full py-4 bg-white text-black rounded-2xl text-lg font-semibold hover:bg-zinc-200 active:scale-95 transition-all"
-          >
-            Record Shot {shotIndex + 1} of {shotList.total_shots}
-          </button>
-        )}
+  // ── Main coach view ────────────────────────────────────────────────────────
+  const elapsedSec = (elapsedMs / 1000).toFixed(1)
+  const targetSec = currentShot.duration_seconds
+  const progress = Math.min(elapsedMs / (targetSec * 1000), 1)
 
-        {recordingState === "recording" && (
-          <button
-            onClick={stopRecording}
-            className="w-full py-4 bg-red-600 text-white rounded-2xl text-lg font-semibold hover:bg-red-700 active:scale-95 transition-all"
-          >
-            Stop Recording
-          </button>
-        )}
+  return (
+    <div className="relative flex flex-col min-h-screen bg-black text-white overflow-hidden">
+      {/* Full-screen camera canvas */}
+      <video ref={videoRef} className="absolute inset-0 w-full h-full object-cover opacity-0" playsInline muted />
+      <canvas ref={canvasRef} className="absolute inset-0 w-full h-full object-cover" />
 
-        {recordingState === "reviewing" && (
-          <div className="space-y-3">
-            {recordedBlob && (
-              <video
-                src={URL.createObjectURL(recordedBlob)}
-                className="w-full max-h-32 rounded-xl bg-zinc-900 object-contain"
-                controls
-                autoPlay
-                muted
-                loop
-              />
-            )}
-            {isMotionShot && (
-              <p className="text-xs text-zinc-400 text-center">
-                Motion shots are hard to evaluate automatically — judge this one yourself.
-              </p>
-            )}
-            <div className="flex gap-3">
-              <button
-                onClick={handleRetake}
-                className="flex-1 py-3 bg-zinc-700 text-white rounded-xl font-medium hover:bg-zinc-600 active:scale-95 transition-all"
-              >
-                Retake
-              </button>
-              <button
-                onClick={handleApprove}
-                className="flex-1 py-3 bg-green-600 text-white rounded-xl font-medium hover:bg-green-500 active:scale-95 transition-all"
-              >
-                {shotIndex + 1 < shotList.total_shots ? "Approve → Next Shot" : "Approve → Finish"}
-              </button>
-            </div>
+      {/* Top bar — progress + shot counter */}
+      <div className="relative z-10 px-4 pt-safe pt-3 space-y-2">
+        <div className="flex gap-1">
+          {shotList.shots.map((_, i) => (
+            <div
+              key={i}
+              className={`h-1 flex-1 rounded-full transition-colors ${
+                i < shotIndex ? "bg-green-400" : i === shotIndex ? "bg-white" : "bg-white/30"
+              }`}
+            />
+          ))}
+        </div>
+        <div className="flex items-center justify-between">
+          <div className="bg-black/50 backdrop-blur-sm rounded-full px-3 py-1 text-xs font-medium">
+            Shot {shotIndex + 1} of {shotList.total_shots}
           </div>
-        )}
+          {recordingState === "recording" && (
+            <div className="flex items-center gap-1.5 bg-red-600/90 rounded-full px-3 py-1 text-xs font-medium">
+              <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+              {elapsedSec}s / {targetSec}s
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Reference frame PiP — top right */}
+      {refFrameUrl && (
+        <div className="absolute top-16 right-4 z-10">
+          <button
+            onClick={() => setRefExpanded((v) => !v)}
+            className={`overflow-hidden rounded-xl border-2 border-white/30 transition-all ${
+              refExpanded ? "w-40 h-24" : "w-20 h-12"
+            }`}
+          >
+            <img src={refFrameUrl} alt="Reference" className="w-full h-full object-cover" />
+          </button>
+        </div>
+      )}
+
+      {/* Recording progress bar */}
+      {recordingState === "recording" && (
+        <div className="absolute bottom-40 left-4 right-4 z-10 h-1 bg-white/20 rounded-full overflow-hidden">
+          <div
+            className="h-full bg-red-500 rounded-full transition-all duration-100"
+            style={{ width: `${progress * 100}%` }}
+          />
+        </div>
+      )}
+
+      {/* Bottom drawer — shot info + controls */}
+      <div className="relative z-10 mt-auto">
+        {/* Shot info card */}
+        <div className="mx-3 mb-3 bg-black/70 backdrop-blur-md rounded-2xl p-4 space-y-2">
+          <ShotCard shot={currentShot} />
+          <p className="text-sm text-zinc-300 leading-relaxed">{currentShot.coaching_tip}</p>
+        </div>
+
+        {/* Action button */}
+        <div className="px-4 pb-safe pb-8">
+          {recordingState === "idle" && (
+            <button
+              onClick={startRecording}
+              className="w-full py-5 bg-white text-black rounded-2xl text-xl font-bold active:scale-95 transition-all"
+            >
+              Record
+            </button>
+          )}
+          {recordingState === "recording" && (
+            <button
+              onClick={stopRecording}
+              className="w-full py-5 bg-red-600 text-white rounded-2xl text-xl font-bold active:scale-95 transition-all"
+            >
+              Stop
+            </button>
+          )}
+        </div>
       </div>
     </div>
   )

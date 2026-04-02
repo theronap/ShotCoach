@@ -24,3 +24,13 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Safe area inset utilities for iPhone notch / home bar */
+.pt-safe { padding-top: env(safe-area-inset-top, 0px); }
+.pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
+
+/* Prevent rubber-band scroll on iOS for full-screen views */
+.no-bounce {
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: auto;
+}

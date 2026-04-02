@@ -1,14 +1,8 @@
 import type { ShotList } from "@/types/shot-list"
 
-// Step 0 prototype: hardcoded shot list from a travel vlog reference video.
-// Used to validate the coaching UX before building the analyzer.
 export const MOCK_SHOT_LIST: ShotList = {
-  reference_video_id: "mock-001",
+  title: "Travel Vlog Sample",
   total_shots: 3,
-  b_roll_suggestions: [
-    "Close-up of hands or feet for texture and pacing",
-    "Wide environmental shot showing the full location",
-  ],
   shots: [
     {
       shot_number: 1,
@@ -25,8 +19,8 @@ export const MOCK_SHOT_LIST: ShotList = {
         zone_y: 0.55,
         zone_width: 0.30,
         zone_height: 0.40,
-        fill_target: 0.15,
-        arrow_direction: null,
+        fill_target: false,
+        arrow_direction: "none",
       },
     },
     {
@@ -37,14 +31,14 @@ export const MOCK_SHOT_LIST: ShotList = {
       camera_angle: "eye-level",
       motion: "pan-right",
       difficulty: "medium",
-      coaching_tip: "Follow your subject as they walk. Start panning before they move and end after they stop — don't chase them.",
+      coaching_tip: "Follow your subject as they walk. Start panning before they move and end after they stop.",
       reference_frame_index: 1,
       overlay: {
         zone_x: 0.25,
         zone_y: 0.15,
         zone_width: 0.50,
         zone_height: 0.70,
-        fill_target: 0.40,
+        fill_target: false,
         arrow_direction: "right",
       },
     },
@@ -53,18 +47,18 @@ export const MOCK_SHOT_LIST: ShotList = {
       duration_seconds: 3,
       label: "Close-up detail shot",
       shot_type: "close-up",
-      camera_angle: "low-angle",
+      camera_angle: "eye-level",
       motion: "static",
       difficulty: "easy",
-      coaching_tip: "Get close — uncomfortably close. The detail should fill most of the frame. Shoot from slightly below for drama.",
+      coaching_tip: "Get close — uncomfortably close. The detail should fill most of the frame.",
       reference_frame_index: 2,
       overlay: {
         zone_x: 0.20,
         zone_y: 0.15,
         zone_width: 0.60,
         zone_height: 0.70,
-        fill_target: 0.65,
-        arrow_direction: null,
+        fill_target: true,
+        arrow_direction: "none",
       },
     },
   ],

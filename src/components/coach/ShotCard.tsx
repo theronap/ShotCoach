@@ -14,7 +14,9 @@ const MOTION_LABELS: Record<Shot["motion"], string> = {
   "pan-right": "Pan →",
   "tilt-up":   "Tilt ↑",
   "tilt-down": "Tilt ↓",
-  "handheld":  "Handheld",
+  "zoom-in":   "Zoom In",
+  "zoom-out":  "Zoom Out",
+  "tracking":  "Tracking",
 }
 
 interface Props {
